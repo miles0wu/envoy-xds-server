@@ -1,0 +1,28 @@
+name: sni_config
+spec:
+  listeners:
+    - name: listener_0
+      address: 0.0.0.0
+      port: 9000
+      sni:
+        - server_names:
+            - mahendrabagul.io
+            - router.mahendrabagul.io
+          secret_names:
+            - example_com
+          routes:
+            - name: echo_route
+              prefix: /
+              clusters:
+                - echo
+  clusters:
+    - name: echo
+      endpoints:
+        - address: 127.0.0.1
+          port: 9102
+        - address: 127.0.0.1
+          port: 9103
+  secrets:
+    - name: example_com
+      private_key_file: "hack/certs/envoy-proxy-server.key"
+      certificate_chain_file: "hack/certs/envoy-proxy-server.crt"

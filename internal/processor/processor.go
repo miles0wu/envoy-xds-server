@@ -50,10 +50,12 @@ func NewProcessor(cache cache.SnapshotCache, nodeID string, log logrus.FieldLogg
 		snapshotVersion: rand.Int63n(1000),
 		FieldLogger:     log,
 		xdsCache: xdscache.XDSCache{
-			Listeners: make(map[string]resources.Listener),
-			Clusters:  make(map[string]resources.Cluster),
-			Routes:    make(map[string]resources.Route),
-			Endpoints: make(map[string]resources.Endpoint),
+			Listeners:    make(map[string]resources.Listener),
+			Clusters:     make(map[string]resources.Cluster),
+			Routes:       make(map[string]resources.Route),
+			Endpoints:    make(map[string]resources.Endpoint),
+			TLSListeners: make(map[string]resources.TLSListener),
+			Secrets:      make(map[string]resources.Secret),
 		},
 	}
 }
@@ -82,8 +84,60 @@ func (p *Processor) ProcessFile(file watcher.NotifyMessage) {
 		return
 	}
 
+	// Parse Secrets
+	for _, s := range envoyConfig.Secrets {
+		key, err := os.ReadFile(s.PrivateKeyFile)
+		if err != nil {
+			continue
+		}
+		ca, err := os.ReadFile(s.CertificateChainFile)
+		if err != nil {
+			continue
+		}
+		p.xdsCache.AddSecret(s.Name, key, ca)
+	}
+
 	// Parse Listeners
 	for _, l := range envoyConfig.Listeners {
+		// HTTPS Listeners
+		if len(l.SNIs) > 0 {
+			cacheSecrets := p.xdsCache.Secrets
+			var snis []resources.SNI
+			for _, sniCfg := range l.SNIs {
+				var secretNames []string
+				for _, secretName := range sniCfg.SecretNames {
+					if _, ok := cacheSecrets[secretName]; !ok {
+						continue
+					}
+					secretNames = append(secretNames, secretName)
+				}
+				if len(secretNames) == 0 {
+					continue
+				}
+
+				var routes []resources.Route
+				for _, r := range sniCfg.Routes {
+					p.xdsCache.AddRoute(r.Name, r.Prefix, r.ClusterNames)
+					routes = append(routes, resources.Route{
+						Name:    r.Name,
+						Prefix:  r.Prefix,
+						Cluster: r.ClusterNames[0],
+					})
+				}
+
+				sni := resources.SNI{
+					ServerNames: sniCfg.ServerNames,
+					SecretNames: secretNames,
+					Routes:      routes,
+				}
+				snis = append(snis, sni)
+			}
+
+			p.xdsCache.AddTLSListener(l.Name, l.Address, l.Port, snis)
+
+			continue
+		}
+		// HTTP Listener
 		var lRoutes []string
 		for _, lr := range l.Routes {
 			lRoutes = append(lRoutes, lr.Name)
@@ -114,7 +168,7 @@ func (p *Processor) ProcessFile(file watcher.NotifyMessage) {
 		p.xdsCache.RouteContents(),     // routes
 		p.xdsCache.ListenerContents(),  // listeners
 		[]types.Resource{},             // runtimes
-		[]types.Resource{},             // secrets
+		p.xdsCache.SecretsContents(),   // secrets
 	)
 
 	if err := snapshot.Consistent(); err != nil {

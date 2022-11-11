@@ -36,3 +36,22 @@ type Endpoint struct {
 	UpstreamHost string
 	UpstreamPort uint32
 }
+
+type TLSListener struct {
+	Name    string
+	Address string
+	Port    uint32
+	SNIs    []SNI
+}
+
+type SNI struct {
+	SecretNames []string
+	ServerNames []string
+	Routes      []Route
+}
+
+type Secret struct {
+	Name             string
+	PrivateKey       []byte
+	CertificateChain []byte
+}

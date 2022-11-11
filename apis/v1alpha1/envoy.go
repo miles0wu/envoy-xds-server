@@ -22,6 +22,7 @@ type EnvoyConfig struct {
 type Spec struct {
 	Listeners []Listener `yaml:"listeners"`
 	Clusters  []Cluster  `yaml:"clusters"`
+	Secrets   []Secret   `yaml:"secrets"`
 }
 
 type Listener struct {
@@ -29,6 +30,7 @@ type Listener struct {
 	Address string  `yaml:"address"`
 	Port    uint32  `yaml:"port"`
 	Routes  []Route `yaml:"routes"`
+	SNIs    []SNI   `yaml:"sni"`
 }
 
 type Route struct {
@@ -45,4 +47,17 @@ type Cluster struct {
 type Endpoint struct {
 	Address string `yaml:"address"`
 	Port    uint32 `yaml:port"`
+}
+
+// SNI server name indication
+type SNI struct {
+	ServerNames []string `yaml:"server_names"`
+	SecretNames []string `yaml:"secret_names"`
+	Routes      []Route  `yaml:"routes"`
+}
+
+type Secret struct {
+	Name                 string `yaml:"name"`
+	PrivateKeyFile       string `yaml:"private_key_file"`
+	CertificateChainFile string `yaml:"certificate_chain_file"`
 }

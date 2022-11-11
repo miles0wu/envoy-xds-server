@@ -4,6 +4,7 @@ This is a sample repo which demonstrates how to spin up an xDS Server for Envoy 
 
 ## Sample Config File
 
+* origin
 ```yaml
 name: testconfig
 spec: 
@@ -23,6 +24,38 @@ spec:
       port: 9101
     - address: 127.0.0.1
       port: 9102
+```
+
+* https
+```bash
+name: sni_config
+spec:
+  listeners:
+    - name: listener_0
+      address: 0.0.0.0
+      port: 9000
+      sni:
+        - server_names:
+            - mahendrabagul.io
+            - router.mahendrabagul.io
+          secret_names:
+            - example_com
+          routes:
+            - name: echo_route
+              prefix: /
+              clusters:
+                - echo
+  clusters:
+    - name: echo
+      endpoints:
+        - address: 127.0.0.1
+          port: 9101
+        - address: 127.0.0.1
+          port: 9102
+  secrets:
+    - name: example_com
+      private_key_file: "config/certs/envoy-proxy-server.key"
+      certificate_chain_file: "config/certs/envoy-proxy-server.crt"
 ```
 
 ## Sample Apps

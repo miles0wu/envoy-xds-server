@@ -20,10 +20,12 @@ import (
 )
 
 type XDSCache struct {
-	Listeners map[string]resources.Listener
-	Routes    map[string]resources.Route
-	Clusters  map[string]resources.Cluster
-	Endpoints map[string]resources.Endpoint
+	Listeners    map[string]resources.Listener
+	Routes       map[string]resources.Route
+	Clusters     map[string]resources.Cluster
+	Endpoints    map[string]resources.Endpoint
+	TLSListeners map[string]resources.TLSListener
+	Secrets      map[string]resources.Secret
 }
 
 func (xds *XDSCache) ClusterContents() []types.Resource {
@@ -52,6 +54,9 @@ func (xds *XDSCache) ListenerContents() []types.Resource {
 	for _, l := range xds.Listeners {
 		r = append(r, resources.MakeHTTPListener(l.Name, l.RouteNames[0], l.Address, l.Port))
 	}
+	for _, tl := range xds.TLSListeners {
+		r = append(r, resources.MakeHTTPSListener(tl.Name, tl.Address, tl.Port, tl.SNIs))
+	}
 
 	return r
 }
@@ -61,6 +66,16 @@ func (xds *XDSCache) EndpointsContents() []types.Resource {
 
 	for _, c := range xds.Clusters {
 		r = append(r, resources.MakeEndpoint(c.Name, c.Endpoints))
+	}
+
+	return r
+}
+
+func (xds *XDSCache) SecretsContents() []types.Resource {
+	var r []types.Resource
+
+	for _, s := range xds.Secrets {
+		r = append(r, resources.MakeSecret(s.Name, s.PrivateKey, s.CertificateChain))
 	}
 
 	return r
@@ -98,4 +113,21 @@ func (xds *XDSCache) AddEndpoint(clusterName, upstreamHost string, upstreamPort 
 	})
 
 	xds.Clusters[clusterName] = cluster
+}
+
+func (xds *XDSCache) AddSecret(name string, privateKey, certificateChain []byte) {
+	xds.Secrets[name] = resources.Secret{
+		Name:             name,
+		PrivateKey:       privateKey,
+		CertificateChain: certificateChain,
+	}
+}
+
+func (xds *XDSCache) AddTLSListener(name string, address string, port uint32, snis []resources.SNI) {
+	xds.TLSListeners[name] = resources.TLSListener{
+		Name:    name,
+		Address: address,
+		Port:    port,
+		SNIs:    snis,
+	}
 }

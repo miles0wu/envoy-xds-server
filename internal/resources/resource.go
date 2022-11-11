@@ -25,6 +25,7 @@ import (
 	listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	auth "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 )
@@ -88,7 +89,7 @@ func MakeRoute(routes []Route) *route.RouteConfiguration {
 
 	for _, r := range routes {
 		rts = append(rts, &route.Route{
-			//Name: r.Name,
+			Name: r.Name,
 			Match: &route.RouteMatch{
 				PathSpecifier: &route.RouteMatch_Prefix{
 					Prefix: r.Prefix,
@@ -158,6 +159,70 @@ func MakeHTTPListener(listenerName, route, address string, port uint32) *listene
 	}
 }
 
+func MakeHTTPSListener(listenerName, address string, port uint32, snis []SNI) *listener.Listener {
+	filterChains := make([]*listener.FilterChain, 0, len(snis))
+	for _, sni := range snis {
+		sdsTls := makeDownstreamTlsContext(sni.SecretNames)
+		sdsCfg, err := ptypes.MarshalAny(sdsTls)
+		if err != nil {
+			panic(err)
+		}
+
+		filters := make([]*listener.Filter, 0, len(sni.Routes))
+		// HTTP filter configuration
+		manager := &hcm.HttpConnectionManager{
+			CodecType:  hcm.HttpConnectionManager_AUTO,
+			StatPrefix: "http",
+			RouteSpecifier: &hcm.HttpConnectionManager_Rds{
+				Rds: &hcm.Rds{
+					RouteConfigName: "listener_0",
+					ConfigSource:    makeConfigSource(),
+				},
+			},
+			HttpFilters: []*hcm.HttpFilter{{
+				Name: wellknown.Router,
+			}},
+		}
+		pbst, err := ptypes.MarshalAny(manager)
+		if err != nil {
+			panic(err)
+		}
+		filters = append(filters, &listener.Filter{
+			Name: wellknown.HTTPConnectionManager,
+			ConfigType: &listener.Filter_TypedConfig{
+				TypedConfig: pbst,
+			},
+		})
+
+		filterChains = append(filterChains, &listener.FilterChain{
+			FilterChainMatch: makeFilterChainMatch(sni.ServerNames),
+			TransportSocket: &core.TransportSocket{
+				Name: "envoy.transport_sockets.tls",
+				ConfigType: &core.TransportSocket_TypedConfig{
+					TypedConfig: sdsCfg,
+				},
+			},
+			Filters: filters,
+		})
+	}
+
+	return &listener.Listener{
+		Name: listenerName,
+		Address: &core.Address{
+			Address: &core.Address_SocketAddress{
+				SocketAddress: &core.SocketAddress{
+					Protocol: core.SocketAddress_TCP,
+					Address:  address,
+					PortSpecifier: &core.SocketAddress_PortValue{
+						PortValue: port,
+					},
+				},
+			},
+		},
+		FilterChains: filterChains,
+	}
+}
+
 func makeConfigSource() *core.ConfigSource {
 	source := &core.ConfigSource{}
 	source.ResourceApiVersion = resource.DefaultAPIVersion
@@ -174,4 +239,50 @@ func makeConfigSource() *core.ConfigSource {
 		},
 	}
 	return source
+}
+
+func MakeSecret(name string, key, crt []byte) *auth.Secret {
+	return &auth.Secret{
+		Name: name,
+		Type: &auth.Secret_TlsCertificate{
+			TlsCertificate: &auth.TlsCertificate{
+				CertificateChain: &core.DataSource{
+					Specifier: &core.DataSource_InlineBytes{InlineBytes: crt},
+				},
+				PrivateKey: &core.DataSource{
+					Specifier: &core.DataSource_InlineBytes{InlineBytes: key},
+				},
+			},
+		},
+	}
+}
+
+func makeSdsSecretConfig(secretName string) *auth.SdsSecretConfig {
+	return &auth.SdsSecretConfig{
+		Name: secretName,
+		SdsConfig: &core.ConfigSource{
+			ConfigSourceSpecifier: &core.ConfigSource_Ads{
+				Ads: &core.AggregatedConfigSource{},
+			},
+			ResourceApiVersion: core.ApiVersion_V3,
+		},
+	}
+}
+
+func makeDownstreamTlsContext(secretNames []string) *auth.DownstreamTlsContext {
+	sdsSecretConfigs := make([]*auth.SdsSecretConfig, 0, len(secretNames))
+	for _, secretName := range secretNames {
+		sdsSecretConfigs = append(sdsSecretConfigs, makeSdsSecretConfig(secretName))
+	}
+	return &auth.DownstreamTlsContext{
+		CommonTlsContext: &auth.CommonTlsContext{
+			TlsCertificateSdsSecretConfigs: sdsSecretConfigs,
+		},
+	}
+}
+
+func makeFilterChainMatch(serverNames []string) *listener.FilterChainMatch {
+	return &listener.FilterChainMatch{
+		ServerNames: serverNames,
+	}
 }
